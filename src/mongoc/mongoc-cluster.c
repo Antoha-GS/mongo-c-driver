@@ -1120,19 +1120,10 @@ _mongoc_cluster_auth_node_scram (mongoc_cluster_t *cluster,
 
    _mongoc_scram_set_pass (&scram, mongoc_uri_get_password (cluster->uri));
    _mongoc_scram_set_user (&scram, mongoc_uri_get_username (cluster->uri));
-   if (*cluster->scram_client_key) {
-      _mongoc_scram_set_client_key (
-         &scram, cluster->scram_client_key, sizeof (cluster->scram_client_key));
-   }
-   if (*cluster->scram_server_key) {
-      _mongoc_scram_set_server_key (
-         &scram, cluster->scram_server_key, sizeof (cluster->scram_server_key));
-   }
-   if (*cluster->scram_salted_password) {
-      _mongoc_scram_set_salted_password (
-         &scram,
-         cluster->scram_salted_password,
-         sizeof (cluster->scram_salted_password));
+
+   /* Apply previously cached SCRAM secrets if available */
+   if (cluster->scram_cache) {
+      _mongoc_scram_set_cache (&scram, cluster->scram_cache);
    }
 
    for (;;) {
@@ -1227,15 +1218,12 @@ _mongoc_cluster_auth_node_scram (mongoc_cluster_t *cluster,
    TRACE ("%s", "SCRAM: authenticated");
 
    ret = true;
-   memcpy (cluster->scram_client_key,
-           scram.client_key,
-           sizeof (cluster->scram_client_key));
-   memcpy (cluster->scram_server_key,
-           scram.server_key,
-           sizeof (cluster->scram_server_key));
-   memcpy (cluster->scram_salted_password,
-           scram.salted_password,
-           sizeof (cluster->scram_salted_password));
+
+   if (cluster->scram_cache) {
+      _mongoc_scram_cache_destroy (cluster->scram_cache);
+   }
+
+   cluster->scram_cache = _mongoc_scram_get_cache (&scram);
 
 failure:
    _mongoc_scram_destroy (&scram);
@@ -1929,6 +1917,11 @@ mongoc_cluster_destroy (mongoc_cluster_t *cluster) /* INOUT */
 
    _mongoc_array_destroy (&cluster->iov);
 
+#ifdef MONGOC_ENABLE_CRYPTO
+   if (cluster->scram_cache) {
+      _mongoc_scram_cache_destroy (cluster->scram_cache);
+   }
+#endif
    EXIT;
 }
 
